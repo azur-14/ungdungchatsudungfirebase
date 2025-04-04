@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-
 import 'login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -13,19 +12,31 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+
   final _auth = FirebaseAuth.instance;
 
   bool _isLoading = false;
   bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+    );
+  }
 
   void _register() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
+    final confirmPassword = _confirmPasswordController.text.trim();
 
     if (password.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Password must be at least 6 characters'), backgroundColor: Colors.redAccent),
-      );
+      _showError("Password must be at least 6 characters");
+      return;
+    }
+    if (password != confirmPassword) {
+      _showError("Passwords do not match");
       return;
     }
 
@@ -37,6 +48,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         password: password,
       );
 
+      // Debug print
+      print("User registered with UID: ${userCredential.user!.uid}");
+
       await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
         'email': email,
         'friends': [],
@@ -44,11 +58,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'pending_sent_requests': [],
       });
 
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => LoginScreen()));
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Registration failed: ${e.toString()}'), backgroundColor: Colors.redAccent),
+      // Gửi email xác minh
+      await userCredential.user!.sendEmailVerification();
+
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text("Verify Your Email"),
+          content: Text("A verification email has been sent to $email. Please check your inbox."),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => LoginScreen()));
+              },
+              child: Text("OK"),
+            ),
+          ],
+        ),
       );
+    } catch (e) {
+      _showError("Registration failed: ${e.toString()}");
+      print("Registration error: $e");
     } finally {
       setState(() => _isLoading = false);
     }
@@ -103,6 +134,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                             onPressed: () {
                               setState(() => _obscurePassword = !_obscurePassword);
+                            },
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 16),
+                      TextField(
+                        controller: _confirmPasswordController,
+                        obscureText: _obscureConfirmPassword,
+                        decoration: InputDecoration(
+                          labelText: 'Confirm Password',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          prefixIcon: Icon(Icons.lock_outline),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscureConfirmPassword ? Icons.visibility : Icons.visibility_off,
+                            ),
+                            onPressed: () {
+                              setState(() => _obscureConfirmPassword = !_obscureConfirmPassword);
                             },
                           ),
                         ),
