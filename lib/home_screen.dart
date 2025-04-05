@@ -9,6 +9,8 @@ import 'chat_screen.dart';
 import 'login_screen.dart';
 
 class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
   @override
   _HomeScreenState createState() => _HomeScreenState();
 }
@@ -209,7 +211,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final raw = userSnap.data();
       if (raw == null) return [];
 
-      final data = raw as Map<String, dynamic>;
+      final data = raw;
       final List<dynamic> friendIds = data['friends'] ?? [];
       final List<Map<String, dynamic>> results = [];
 

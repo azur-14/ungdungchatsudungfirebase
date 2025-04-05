@@ -12,16 +12,16 @@ void main() async {
   final prefs = await SharedPreferences.getInstance();
   final uid = prefs.getString('uid');
 
-  // đảm bảo auth được load
-  await FirebaseAuth.instance.authStateChanges().first;
-
-  runApp(MyApp(isLoggedIn: uid != null));
+  // Đợi xác thực xong mới chạy app
+  final currentUser = FirebaseAuth.instance.currentUser;
+  runApp(MyApp(isLoggedIn: uid != null && currentUser != null));
 }
+
 
 class MyApp extends StatelessWidget {
   final bool isLoggedIn;
 
-  MyApp({required this.isLoggedIn});
+  const MyApp({super.key, required this.isLoggedIn});
 
   @override
   Widget build(BuildContext context) {
