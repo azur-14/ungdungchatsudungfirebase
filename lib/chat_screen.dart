@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-
 import 'login_screen.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -25,7 +24,6 @@ class _ChatScreenState extends State<ChatScreen> {
   final _scrollController = ScrollController();
   final _picker = ImagePicker();
   final FocusNode _inputFocusNode = FocusNode();
-
   User? _currentUser;
 
   @override
@@ -57,14 +55,12 @@ class _ChatScreenState extends State<ChatScreen> {
       'image': imageBase64 ?? '',
     };
 
-    // Lưu tin nhắn vào subcollection 'chat'
     await _firestore
         .collection('messages')
         .doc(widget.chatRoomId)
         .collection('chat')
         .add(messageData);
 
-    // Cập nhật thông tin tin nhắn cuối cùng ở document cha
     await _firestore.collection('messages').doc(widget.chatRoomId).set({
       'lastMessage': text?.isNotEmpty == true ? text : '[Image]',
       'lastSender': _currentUser?.email,
@@ -91,7 +87,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final themeColor = Colors.deepPurple;
+    final Color themeColor = const Color(0xFF3F51B5); // Indigo
+    final Color accentColor = const Color(0xFFFFC107); // Amber
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
       appBar: AppBar(
@@ -111,7 +109,6 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          // Danh sách tin nhắn
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: _firestore
@@ -136,7 +133,9 @@ class _ChatScreenState extends State<ChatScreen> {
                         margin: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                         padding: EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: isMe ? themeColor.withOpacity(0.7) : Colors.grey[300],
+                          color: isMe
+                              ? themeColor.withOpacity(0.85)
+                              : (isDark ? Colors.grey[700] : Colors.grey[300]),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: data['image'] != ''
@@ -145,9 +144,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             showDialog(
                               context: context,
                               builder: (_) => Dialog(
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                 child: Container(
                                   padding: EdgeInsets.all(10),
                                   constraints: BoxConstraints(
@@ -169,7 +166,10 @@ class _ChatScreenState extends State<ChatScreen> {
                             fit: BoxFit.cover,
                           ),
                         )
-                            : Text(data['text'] ?? ''),
+                            : Text(
+                          data['text'] ?? '',
+                          style: TextStyle(color: isMe ? Colors.white : Colors.black87),
+                        ),
                       ),
                     );
                   },
@@ -178,34 +178,30 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
           Divider(height: 1),
-          // Nhập tin nhắn
           Container(
             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            color: Colors.white,
+            color: isDark ? Colors.grey[850] : Colors.white,
             child: Row(
               children: [
                 IconButton(
-                  icon: Icon(Icons.image, color: themeColor),
+                  icon: Icon(Icons.image, color: accentColor),
                   onPressed: _pickImage,
                 ),
                 Expanded(
                   child: RawKeyboardListener(
                     focusNode: _inputFocusNode,
-                    onKey: (RawKeyEvent event) {
+                    onKey: (event) {
                       if (event is RawKeyDownEvent &&
                           event.logicalKey == LogicalKeyboardKey.enter) {
                         if (event.isShiftPressed) {
-                          // Shift + Enter: chèn xuống dòng
                           final text = _controller.text;
                           final selection = _controller.selection;
                           final newText = text.replaceRange(selection.start, selection.end, '\n');
                           _controller.text = newText;
-                          final newPosition = selection.start + 1;
                           _controller.selection = TextSelection.fromPosition(
-                            TextPosition(offset: newPosition),
+                            TextPosition(offset: selection.start + 1),
                           );
                         } else {
-                          // Chỉ Enter: gửi tin nhắn
                           _sendMessage(text: _controller.text.trim());
                           _controller.clear();
                         }

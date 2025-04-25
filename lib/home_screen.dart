@@ -19,8 +19,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _auth = FirebaseAuth.instance;
   final _firestore = FirebaseFirestore.instance;
   final _searchController = TextEditingController();
-  final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
-
+  final _notificationsPlugin = FlutterLocalNotificationsPlugin();
   User get currentUser => _auth.currentUser!;
 
   @override
@@ -33,22 +32,20 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _initializeNotifications() {
-    const AndroidInitializationSettings initializationSettingsAndroid =
-    AndroidInitializationSettings('@mipmap/ic_launcher');
-    final InitializationSettings initializationSettings =
-    InitializationSettings(android: initializationSettingsAndroid);
-    _notificationsPlugin.initialize(initializationSettings);
+    const AndroidInitializationSettings initAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
+    final settings = InitializationSettings(android: initAndroid);
+    _notificationsPlugin.initialize(settings);
   }
 
   void _showNotification(String title, String body) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'channel_id',
+    const androidDetails = AndroidNotificationDetails(
+      'chat_channel',
       'Chat Notifications',
-      importance: Importance.high,
+      importance: Importance.max,
       priority: Priority.high,
     );
-    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
-    await _notificationsPlugin.show(0, title, body, platformDetails);
+    const details = NotificationDetails(android: androidDetails);
+    await _notificationsPlugin.show(0, title, body, details);
   }
 
   Future<void> _createUserIfNotExist() async {
@@ -62,7 +59,6 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
   }
-
   void _listenToFriendRequests() {
     _firestore.collection('users').doc(currentUser.uid).snapshots().listen((doc) {
       final data = doc.data() as Map<String, dynamic>;
@@ -74,7 +70,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _listenToIncomingMessages() {
-    _firestore.collection('messages').snapshots().listen((snapshot) {
+    _firestore
+        .collection('messages')
+        .where('participants', arrayContains: currentUser.uid)
+        .snapshots()
+        .listen((snapshot) {
       for (var doc in snapshot.docs) {
         final lastSender = doc['lastSender'];
         final lastMessage = doc['lastMessage'];
@@ -87,169 +87,38 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _searchAndSendRequest() async {
     final email = _searchController.text.trim();
-    if (email.isEmpty) return;
-
-    if (email == currentUser.email) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text("You cannot send a friend request to yourself."),
-        backgroundColor: Colors.redAccent,
-      ));
-      return;
-    }
+    if (email.isEmpty || email == currentUser.email) return;
 
     final result = await _firestore.collection('users').where('email', isEqualTo: email).get();
     if (result.docs.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('User not found')));
+      _showSnack('User not found');
       return;
     }
 
-    final targetDoc = result.docs.first;
-    final targetUid = targetDoc.id;
+    final targetUid = result.docs.first.id;
+    final currentRef = _firestore.collection('users').doc(currentUser.uid);
+    final targetRef = _firestore.collection('users').doc(targetUid);
 
-    final currentDocRef = _firestore.collection('users').doc(currentUser.uid);
-    final targetDocRef = _firestore.collection('users').doc(targetUid);
-
-    final currentDoc = await currentDocRef.get();
-    final targetDocSnapshot = await targetDocRef.get();
+    final currentDoc = await currentRef.get();
+    final targetDocSnap = await targetRef.get();
 
     List sent = List.from(currentDoc['pending_sent_requests'] ?? []);
     List received = List.from(currentDoc['friend_requests'] ?? []);
     List friends = List.from(currentDoc['friends'] ?? []);
 
-    if (friends.contains(targetUid)) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('You are already friends')));
-      return;
-    }
-
-    if (received.contains(targetUid)) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('This user has already sent you a friend request')));
-      return;
-    }
-
-    if (sent.contains(targetUid)) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Friend request already sent')));
-      return;
-    }
+    if (friends.contains(targetUid)) return _showSnack('Already friends');
+    if (received.contains(targetUid)) return _showSnack('They already sent you a request');
+    if (sent.contains(targetUid)) return _showSnack('Request already sent');
 
     sent.add(targetUid);
-    List targetReceived = List.from(targetDocSnapshot['friend_requests'] ?? []);
+    List targetReceived = List.from(targetDocSnap['friend_requests'] ?? []);
     targetReceived.add(currentUser.uid);
 
-    await currentDocRef.update({'pending_sent_requests': sent});
-    await targetDocRef.update({'friend_requests': targetReceived});
-
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Friend request sent')));
+    await currentRef.update({'pending_sent_requests': sent});
+    await targetRef.update({'friend_requests': targetReceived});
+    _showSnack('Friend request sent');
+    _searchController.clear();
   }
-
-  void _cancelSentRequest(String targetUid) async {
-    final userRef = _firestore.collection('users').doc(currentUser.uid);
-    final targetRef = _firestore.collection('users').doc(targetUid);
-
-    final userDoc = await userRef.get();
-    final targetDoc = await targetRef.get();
-
-    List sent = List.from(userDoc['pending_sent_requests'] ?? []);
-    List received = List.from(targetDoc['friend_requests'] ?? []);
-
-    sent.remove(targetUid);
-    received.remove(currentUser.uid);
-
-    await userRef.update({'pending_sent_requests': sent});
-    await targetRef.update({'friend_requests': received});
-
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Friend request cancelled')));
-  }
-
-  void _acceptFriend(String requesterUid) async {
-    final userRef = _firestore.collection('users').doc(currentUser.uid);
-    final requesterRef = _firestore.collection('users').doc(requesterUid);
-
-    final userDoc = await userRef.get();
-    final requesterDoc = await requesterRef.get();
-
-    List myFriends = List.from(userDoc['friends'] ?? []);
-    List myRequests = List.from(userDoc['friend_requests'] ?? []);
-    List requesterFriends = List.from(requesterDoc['friends'] ?? []);
-    List requesterSent = List.from(requesterDoc['pending_sent_requests'] ?? []);
-
-    myFriends.add(requesterUid);
-    requesterFriends.add(currentUser.uid);
-
-    myRequests.remove(requesterUid);
-    requesterSent.remove(currentUser.uid);
-
-    await userRef.update({'friends': myFriends, 'friend_requests': myRequests});
-    await requesterRef.update({'friends': requesterFriends, 'pending_sent_requests': requesterSent});
-  }
-
-  // FIXED: Sử dụng UID và sắp xếp chúng để tạo chatRoomId duy nhất
-  void _goToChat(String friendUid, String friendEmail) {
-    if (friendUid == currentUser.uid) {
-      print("Error: friendUid is the same as current user UID.");
-      return;
-    }
-    final ids = [currentUser.uid, friendUid]..sort();
-    final chatRoomId = ids.join("_");
-    print("Navigating to chat room with chatRoomId: $chatRoomId");
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ChatScreen(
-          chatRoomId: chatRoomId,
-          otherUserEmail: friendEmail,
-        ),
-      ),
-    );
-  }
-
-  Stream<List<Map<String, dynamic>>> _allFriendsWithLastMessage() async* {
-    yield* _firestore
-        .collection('users')
-        .doc(currentUser.uid)
-        .snapshots()
-        .asyncMap((userSnap) async {
-      final raw = userSnap.data();
-      if (raw == null) return [];
-
-      final data = raw;
-      final List<dynamic> friendIds = data['friends'] ?? [];
-      final List<Map<String, dynamic>> results = [];
-
-      for (String friendUid in friendIds) {
-        try {
-          final userDoc = await _firestore.collection('users').doc(friendUid).get();
-          if (!userDoc.exists) continue;
-
-          final ids = [currentUser.uid, friendUid]..sort();
-          final chatRoomId = ids.join('_');
-          final messageSnap = await _firestore.collection('messages').doc(chatRoomId).get();
-
-          String lastMessage = '';
-          String lastSender = '';
-
-          if (messageSnap.exists) {
-            final messageData = messageSnap.data();
-            lastMessage = messageData?['lastMessage'] ?? '';
-            lastSender = messageData?['lastSender'] ?? '';
-          }
-
-          results.add({
-            'chatRoomId': chatRoomId,
-            'friendEmail': userDoc['email'],
-            'friendUid': friendUid,
-            'lastMessage': lastMessage,
-            'lastSender': lastSender,
-          });
-        } catch (e) {
-          print("Error loading friend $friendUid: $e");
-          continue;
-        }
-      }
-
-      return results;
-    });
-  }
-
   Widget _buildFriendRequests() {
     return StreamBuilder<DocumentSnapshot>(
       stream: _firestore.collection('users').doc(currentUser.uid).snapshots(),
@@ -336,23 +205,130 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
   }
+  void _cancelSentRequest(String targetUid) async {
+    final userRef = _firestore.collection('users').doc(currentUser.uid);
+    final targetRef = _firestore.collection('users').doc(targetUid);
+    final userDoc = await userRef.get();
+    final targetDoc = await targetRef.get();
 
+    List sent = List.from(userDoc['pending_sent_requests'] ?? []);
+    List received = List.from(targetDoc['friend_requests'] ?? []);
+
+    sent.remove(targetUid);
+    received.remove(currentUser.uid);
+
+    await userRef.update({'pending_sent_requests': sent});
+    await targetRef.update({'friend_requests': received});
+    _showSnack('Request cancelled');
+  }
+
+  void _acceptFriend(String requesterUid) async {
+    final userRef = _firestore.collection('users').doc(currentUser.uid);
+    final requesterRef = _firestore.collection('users').doc(requesterUid);
+    final userDoc = await userRef.get();
+    final requesterDoc = await requesterRef.get();
+
+    List myFriends = List.from(userDoc['friends'] ?? []);
+    List myRequests = List.from(userDoc['friend_requests'] ?? []);
+    List requesterFriends = List.from(requesterDoc['friends'] ?? []);
+    List requesterSent = List.from(requesterDoc['pending_sent_requests'] ?? []);
+
+    myFriends.add(requesterUid);
+    requesterFriends.add(currentUser.uid);
+
+    myRequests.remove(requesterUid);
+    requesterSent.remove(currentUser.uid);
+
+    await userRef.update({'friends': myFriends, 'friend_requests': myRequests});
+    await requesterRef.update({'friends': requesterFriends, 'pending_sent_requests': requesterSent});
+  }
+
+  void _showSnack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
   Future<void> _logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     await FirebaseAuth.instance.signOut();
-    Navigator.pushReplacement(
+    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => LoginScreen()));
+  }
+  void _goToChat(String friendUid, String friendEmail) {
+    if (friendUid == currentUser.uid) {
+      print("Error: friendUid is the same as current user UID.");
+      return;
+    }
+    final ids = [currentUser.uid, friendUid]..sort();
+    final chatRoomId = ids.join("_");
+    print("Navigating to chat room with chatRoomId: $chatRoomId");
+    Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => LoginScreen()),
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          chatRoomId: chatRoomId,
+          otherUserEmail: friendEmail,
+        ),
+      ),
     );
   }
 
+  Stream<List<Map<String, dynamic>>> _allFriendsWithLastMessage() async* {
+    yield* _firestore
+        .collection('users')
+        .doc(currentUser.uid)
+        .snapshots()
+        .asyncMap((userSnap) async {
+      final raw = userSnap.data();
+      if (raw == null) return [];
+
+      final data = raw;
+      final List<dynamic> friendIds = data['friends'] ?? [];
+      final List<Map<String, dynamic>> results = [];
+
+      for (String friendUid in friendIds) {
+        try {
+          final userDoc = await _firestore.collection('users').doc(friendUid).get();
+          if (!userDoc.exists) continue;
+
+          final ids = [currentUser.uid, friendUid]..sort();
+          final chatRoomId = ids.join('_');
+          final messageSnap = await _firestore.collection('messages').doc(chatRoomId).get();
+
+          String lastMessage = '';
+          String lastSender = '';
+
+          if (messageSnap.exists) {
+            final messageData = messageSnap.data();
+            lastMessage = messageData?['lastMessage'] ?? '';
+            lastSender = messageData?['lastSender'] ?? '';
+          }
+
+          results.add({
+            'chatRoomId': chatRoomId,
+            'friendEmail': userDoc['email'],
+            'friendUid': friendUid,
+            'lastMessage': lastMessage,
+            'lastSender': lastSender,
+          });
+        } catch (e) {
+          print("Error loading friend $friendUid: $e");
+          continue;
+        }
+      }
+
+      return results;
+    });
+  }
   @override
   Widget build(BuildContext context) {
-    final themeColor = Colors.deepPurple;
+    final Color themeColor = const Color(0xFF3F51B5); // Indigo
+    final Color accentColor = const Color(0xFFFFC107); // Amber
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final Color cardColor = isDark ? Colors.grey[900]! : Colors.white;
+    final Color iconColor = isDark ? Colors.white : Colors.black87;
 
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text("My Chat", style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w600)),
         backgroundColor: themeColor,
@@ -367,35 +343,50 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Search by email',
-                prefixIcon: Icon(Icons.search),
-                suffixIcon: IconButton(
-                  icon: Icon(Icons.person_add_alt_1),
-                  onPressed: _searchAndSendRequest,
+            padding: const EdgeInsets.all(12),
+            child: Material(
+              elevation: 2,
+              borderRadius: BorderRadius.circular(12),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search by email',
+                  prefixIcon: Icon(Icons.search),
+                  suffixIcon: Container(
+                    margin: EdgeInsets.only(right: 4),
+                    decoration: BoxDecoration(
+                      color: themeColor,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: IconButton(
+                      icon: Icon(Icons.person_add_alt_1, color: Colors.white),
+                      onPressed: _searchAndSendRequest,
+                      tooltip: "Send friend request",
+                    ),
+                  ),
+                  filled: true,
+                  fillColor: cardColor,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                 ),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                filled: true,
-                fillColor: Colors.white,
               ),
             ),
           ),
+
           Divider(),
           _buildFriendRequests(),
           Divider(),
           _buildPendingSentRequests(),
           Divider(),
+
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12.0),
             child: Row(
               children: [
-                Text("Your Friends", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w500)),
+                Text("Your Friends", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
               ],
             ),
           ),
+
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: _allFriendsWithLastMessage(),
@@ -403,36 +394,67 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
                 final chats = snapshot.data!;
                 if (chats.isEmpty) {
-                  return Center(child: Text("No conversations yet.", style: GoogleFonts.poppins(color: Colors.grey)));
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.chat_bubble_outline, color: Colors.grey, size: 48),
+                        SizedBox(height: 12),
+                        Text("No conversations yet.", style: GoogleFonts.poppins(color: Colors.grey)),
+                      ],
+                    ),
+                  );
                 }
 
                 return ListView.builder(
                   itemCount: chats.length,
                   itemBuilder: (context, index) {
                     final chat = chats[index];
-                    final isUnread = chat['lastSender'] != currentUser.email;
+                    final isUnread = chat['lastSender'] != currentUser.email &&
+                        (chat['lastMessage'] ?? '').toString().trim().isNotEmpty;
 
                     return Card(
-                      color: isUnread ? Colors.deepPurple[50] : Colors.white,
+                      color: isUnread ? themeColor.withOpacity(0.05) : cardColor,
+                      shape: RoundedRectangleBorder(
+                        side: isUnread
+                            ? BorderSide(color: themeColor, width: 1.5)
+                            : BorderSide.none,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                       margin: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      elevation: 2,
+                      elevation: isUnread ? 4 : 1,
                       child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: themeColor,
-                          child: Icon(Icons.person, color: Colors.white),
+                        leading: Stack(
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: themeColor,
+                              child: Icon(Icons.person, color: Colors.white),
+                            ),
+                            if (isUnread)
+                              Positioned(
+                                right: 0,
+                                top: 0,
+                                child: Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    color: Colors.redAccent,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
-                        title: Text(chat['friendEmail'], style: GoogleFonts.poppins()),
+                        title: Text(chat['friendEmail'], style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
                         subtitle: Text(
                           (chat['lastMessage'] ?? '').toString().trim().isEmpty
                               ? 'No messages yet'
                               : chat['lastMessage'],
                           style: GoogleFonts.poppins(
-                            fontStyle: (chat['lastMessage'] ?? '').toString().trim().isEmpty
-                                ? FontStyle.italic
-                                : FontStyle.normal,
-                            color: (chat['lastMessage'] ?? '').toString().trim().isEmpty
-                                ? Colors.grey
-                                : Colors.black,
+                            fontWeight: isUnread ? FontWeight.w600 : FontWeight.normal,
+                            color: isUnread
+                                ? (isDark ? Colors.white : Colors.black87)
+                                : (isDark ? Colors.grey[400]! : Colors.black54),
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,

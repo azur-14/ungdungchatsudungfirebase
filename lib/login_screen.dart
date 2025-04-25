@@ -1,3 +1,4 @@
+// LoginScreen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -33,63 +34,30 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (user != null && !user.emailVerified) {
         await user.sendEmailVerification();
-
         showDialog(
           context: context,
           builder: (_) => AlertDialog(
             title: Text("Email Not Verified"),
-            content: Text("A verification email has been sent to ${user.email}. Please verify before logging in."),
+            content: Text("Verification email sent to ${user.email}. Please verify."),
             actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text("OK"),
-              )
+              TextButton(onPressed: () => Navigator.pop(context), child: Text("OK")),
             ],
           ),
         );
-
         await _auth.signOut();
         setState(() => _isLoading = false);
         return;
       }
 
-      // Debug print user info
-      print("User logged in with UID: ${user!.uid}");
-
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('uid', user.uid);
+      await prefs.setString('uid', user!.uid);
       await prefs.setString('email', user.email ?? '');
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => HomeScreen()),
-      );
-    } on FirebaseAuthException catch (e) {
-      String errorMessage;
-      switch (e.code) {
-        case 'user-not-found':
-          errorMessage = 'No user found for that email.';
-          break;
-        case 'wrong-password':
-          errorMessage = 'Incorrect password. Please try again.';
-          break;
-        case 'invalid-email':
-          errorMessage = 'The email address is badly formatted.';
-          break;
-        case 'user-disabled':
-          errorMessage = 'This user has been disabled.';
-          break;
-        default:
-          errorMessage = 'Login failed. Please try again later.';
-      }
-
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => HomeScreen()));
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(errorMessage),
-          backgroundColor: Colors.redAccent,
-        ),
+        SnackBar(content: Text("Login failed. Please try again."), backgroundColor: Colors.redAccent),
       );
-      print("Login error: ${e.toString()}");
     } finally {
       setState(() => _isLoading = false);
     }
@@ -97,93 +65,98 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final themeColor = Colors.deepPurple;
+    final Color themeColor = const Color(0xFF3F51B5);    // Indigo
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: Colors.grey[100],
-      body: Center(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.symmetric(horizontal: 24.0),
-          child: Column(
-            children: [
-              Text(
-                "Welcome Back!",
-                style: GoogleFonts.poppins(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w600,
-                  color: themeColor,
-                ),
-              ),
-              SizedBox(height: 20),
-              Card(
-                elevation: 6,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Column(
-                    children: [
-                      TextField(
-                        controller: _emailController,
-                        decoration: InputDecoration(
-                          labelText: 'Email',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          prefixIcon: Icon(Icons.email),
-                        ),
-                      ),
-                      SizedBox(height: 16),
-                      TextField(
-                        controller: _passwordController,
-                        obscureText: _obscurePassword,
-                        decoration: InputDecoration(
-                          labelText: 'Password',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          prefixIcon: Icon(Icons.lock),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscurePassword ? Icons.visibility : Icons.visibility_off,
+      backgroundColor: isDark ? Colors.grey[900] : Colors.grey[100],
+      body: GestureDetector(
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.lock_outline, size: 80, color: themeColor),
+                SizedBox(height: 16),
+                Text("Welcome Back!",
+                    style: GoogleFonts.poppins(
+                      fontSize: 30,
+                      fontWeight: FontWeight.w700,
+                      color: themeColor,
+                    )),
+                SizedBox(height: 30),
+                Card(
+                  elevation: 10,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildTextField("Email", _emailController, Icons.email, false),
+                        SizedBox(height: 16),
+                        _buildTextField("Password", _passwordController, Icons.lock, true),
+                        SizedBox(height: 24),
+                        _isLoading
+                            ? Center(child: CircularProgressIndicator())
+                            : ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: themeColor,
+                            padding: EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: _login,
+                          child: Text(
+                            "Login",
+                            style: GoogleFonts.poppins(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white, // 👈 Bắt buộc chỉ định rõ ràng
                             ),
-                            onPressed: () {
-                              setState(() => _obscurePassword = !_obscurePassword);
-                            },
                           ),
                         ),
-                      ),
-                      SizedBox(height: 24),
-                      _isLoading
-                          ? CircularProgressIndicator()
-                          : ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: themeColor,
-                          padding: EdgeInsets.symmetric(horizontal: 60, vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        onPressed: _login,
-                        child: Text(
-                          "Login",
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
+                        SizedBox(height: 16),
+                        Center(
+                          child: TextButton(
+                            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RegisterScreen())),
+                            child: Text("Don't have an account? Register",
+                                style: GoogleFonts.poppins(
+                                  color: themeColor,
+                                  fontWeight: FontWeight.w500,
+                                  decoration: TextDecoration.underline,
+                                )),
                           ),
                         ),
-                      ),
-                      SizedBox(height: 12),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => RegisterScreen()));
-                        },
-                        child: Text(
-                          "Don't have an account? Register",
-                          style: TextStyle(color: themeColor),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildTextField(String label, TextEditingController controller, IconData icon, bool obscure) {
+    return TextField(
+      controller: controller,
+      obscureText: obscure ? _obscurePassword : false,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon),
+        filled: true,
+        fillColor: Theme.of(context).cardColor,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        suffixIcon: obscure
+            ? IconButton(
+          icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off),
+          onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+        )
+            : null,
       ),
     );
   }
